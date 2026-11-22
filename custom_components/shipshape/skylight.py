@@ -278,6 +278,16 @@ class SkylightClient:
             except ValueError as err:
                 raise SkylightError(f"Skylight returned something unexpected for {path}") from err
 
+    async def request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        body: dict[str, Any] | None = None,
+    ) -> Any:
+        """Raw API call, for diagnostics."""
+        return await self._request(method.upper(), path, params, body)
+
     # --- reads -----------------------------------------------------------
     async def frames(self) -> list[dict[str, Any]]:
         data = await self._request("GET", "/frames")

@@ -7,10 +7,12 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 from .manager import ShipshapeError, get_manager
+from .skylight import SkylightError
 
 CHORE_REF = {
     vol.Optional("chore_id"): cv.string,
@@ -111,6 +113,70 @@ def async_register_services(hass: HomeAssistant) -> None:
             sent = int(await notifier.async_announce())
         return {"sent": sent}
 
+    async def _require_admin(call: ServiceCall) -> None:
+        if call.context.user_id:
+            user = await hass.auth.async_get_user(call.context.user_id)
+            if user is None or not user.is_admin:
+                raise Unauthorized
+
+    def _skylight():
+        sync = hass.data.get(DOMAIN, {}).get("skylight")
+        if sync is None:
+            raise ShipshapeError("Shipshape is not set up")
+        return sync
+
+    async def skylight_status(call: ServiceCall) -> ServiceResponse:
+        """What the Skylight sync currently believes. No secrets."""
+        await _require_admin(call)
+        sync = _skylight()
+        state = sync.manager.data["skylight"]
+        opts = sync.manager.options
+        return {
+            "enabled": sync.enabled,
+            "signed_in": bool((state.get("auth") or {}).get("access_token")),
+            "needs_login": sync.needs_login,
+            "last_error": sync.last_error,
+            "frame": sync.frame,
+            "options": {k: v for k, v in opts.items() if k.startswith("skylight_")},
+            "open": state.get("chores", {}),
+            "watching": state.get("done", {}),
+            "lists": state.get("lists", {}),
+        }
+
+    async def skylight_api(call: ServiceCall) -> ServiceResponse:
+        """Raw call to Skylight's private API on the configured frame (diagnostics)."""
+        await _require_admin(call)
+        sync = _skylight()
+        if not (sync.manager.data["skylight"].get("auth") or {}).get("access_token"):
+            raise ShipshapeError("Not signed in to Skylight")
+        path = str(call.data["path"]).replace("{frame}", sync.frame)
+        if not (path == "/frames" or path == "/user" or path.startswith(f"/frames/{sync.frame}")) or ".." in path:
+            raise ShipshapeError("Only paths on the configured Skylight frame are allowed")
+        try:
+            result = await sync.client().request(
+                call.data.get("method", "GET"), path, call.data.get("params"), call.data.get("body")
+            )
+        except SkylightError as err:
+            return {"ok": False, "error": str(err)}
+        return {"ok": True, "result": result}
+
+    hass.services.async_register(
+        DOMAIN, "skylight_status", skylight_status, vol.Schema({}), supports_response=SupportsResponse.ONLY
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "skylight_api",
+        skylight_api,
+        vol.Schema(
+            {
+                vol.Required("path"): cv.string,
+                vol.Optional("method", default="GET"): vol.In(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+                vol.Optional("params"): dict,
+                vol.Optional("body"): dict,
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
     hass.services.async_register(
         DOMAIN,
         "send_reminders",

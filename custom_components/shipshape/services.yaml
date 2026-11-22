@@ -127,3 +127,29 @@ send_reminders:
             - digest
             - push
             - announce
+
+skylight_status:
+
+skylight_api:
+  fields:
+    path:
+      required: true
+      example: "/frames/{frame}/categories"
+      selector:
+        text:
+    method:
+      default: GET
+      selector:
+        select:
+          options:
+            - GET
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+    params:
+      selector:
+        object:
+    body:
+      selector:
+        object:

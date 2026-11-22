@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "shipshape"
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 STORAGE_KEY = DOMAIN
 STORAGE_VERSION = 1
