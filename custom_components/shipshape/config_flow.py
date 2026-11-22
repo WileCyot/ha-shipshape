@@ -287,9 +287,10 @@ class ShipshapeOptionsFlow(OptionsFlow):
             _LOGGER.warning("Skylight token exchange failed: %s", err)
             return self.async_abort(reason="skylight_failed")
         finally:
-            if self._session is not None:
-                await self._session.close()
-                self._session = None
+            # The session comes from Home Assistant's helper, which closes it
+            # itself on shutdown; closing it here trips a core warning.
+            self._session = None
+            self._login = None
         self._sync().store_tokens(tokens)
         return await self.async_step_skylight_frame()
 

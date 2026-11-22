@@ -1,5 +1,5 @@
 /* Shipshape dashboard card. Vanilla custom element, no build step. */
-const SHIPSHAPE_VERSION = "0.1.0";
+const SHIPSHAPE_VERSION = "0.1.1";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ZONE_ICONS = [
