@@ -1,0 +1,15 @@
+{
+  "domain": "shipshape",
+  "name": "Shipshape",
+  "after_dependencies": ["calendar", "mobile_app", "person"],
+  "codeowners": ["@WileCyot"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend", "websocket_api"],
+  "documentation": "https://github.com/WileCyot/ha-shipshape",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/WileCyot/ha-shipshape/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

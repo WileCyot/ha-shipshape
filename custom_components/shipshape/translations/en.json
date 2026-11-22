@@ -1,0 +1,193 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Shipshape",
+        "description": "Shipshape tracks recurring household chores by condition: each chore drifts from clean to due over its interval, and resets when you mark it done.",
+        "data": {
+          "starter_library": "Start with the built-in rooms and chores"
+        },
+        "data_description": {
+          "starter_library": "Turn this off to start empty or to import your own list."
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Shipshape is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shipshape settings",
+        "menu_options": {
+          "people": "People and phones",
+          "reminders": "Reminders",
+          "calendar": "Calendar bridge (Google Calendar, Skylight)",
+          "skylight": "Skylight Chores (unofficial)"
+        }
+      },
+      "people": {
+        "title": "People and phones",
+        "description": "Choose who takes part in chores. Leave a phone empty to let Shipshape pick the phone linked to that person.",
+        "data": {
+          "participants": "People who do chores"
+        }
+      },
+      "reminders": {
+        "title": "Reminders",
+        "description": "Every reminder is optional. Nothing is sent while vacation mode is on.",
+        "data": {
+          "digest_enabled": "Morning digest",
+          "digest_time": "Digest time",
+          "push_enabled": "Chore pushes with Done and Snooze buttons",
+          "push_time": "Push time",
+          "push_max": "Most pushes per person per day",
+          "announce_enabled": "Spoken announcement",
+          "announce_time": "Announcement time",
+          "announce_targets": "Announce on",
+          "dashboard_path": "Dashboard to open from a notification"
+        },
+        "data_description": {
+          "digest_enabled": "One summary per person of what is due today.",
+          "push_enabled": "A separate notification for each of the most urgent chores.",
+          "announce_targets": "Notify actions that speak, for example notify.alexa_media_kitchen."
+        }
+      },
+      "calendar": {
+        "title": "Calendar bridge",
+        "description": "Shipshape can keep one all-day event per due chore in another calendar, such as a Google calendar your Skylight syncs. The calendar must allow Home Assistant to create and delete events.",
+        "data": {
+          "calendar_entity": "Calendar to write chores to",
+          "calendar_horizon": "Days ahead to show",
+          "calendar_done_on_delete": "Deleting the event marks the chore done"
+        },
+        "data_description": {
+          "calendar_entity": "Leave empty to turn the bridge off.",
+          "calendar_horizon": "0 shows a chore only on the day it is due.",
+          "calendar_done_on_delete": "Lets you clear a due chore from the wall display. Events for chores that are not due yet are just dismissed."
+        }
+      },
+      "skylight": {
+        "title": "Skylight Chores",
+        "description": "Sends due chores to Skylight's own Chores and reads completions back, using the private API of the Skylight app. Skylight does not support this and it can stop working at any time.\n\nStatus: {status}. Sync is currently {enabled}. Leave email and password empty to keep the current sign-in.",
+        "data": {
+          "skylight_enabled": "Sync with Skylight Chores",
+          "email": "Skylight email",
+          "password": "Skylight password"
+        },
+        "data_description": {
+          "password": "Used once to sign in. Only the resulting session tokens are stored."
+        }
+      },
+      "skylight_code": {
+        "title": "Check your email",
+        "description": "Skylight emailed a 6-digit code to the account owner. Enter it here.",
+        "data": {
+          "code": "Verification code"
+        }
+      },
+      "skylight_frame": {
+        "title": "Choose your Skylight",
+        "data": {
+          "skylight_frame": "Skylight device"
+        }
+      },
+      "skylight_profiles": {
+        "title": "Skylight profiles",
+        "description": "Skylight needs every chore to belong to a profile. Chores with no assignee go to the default profile.",
+        "data": {
+          "skylight_default_profile": "Default profile"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Skylight rejected that email or password.",
+      "invalid_code": "That code was not accepted. Try again.",
+      "cannot_connect": "Could not reach Skylight, or its sign-in page has changed.",
+      "rate_limited": "Skylight is rate limiting sign-ins. Wait a while and try again.",
+      "credentials_needed": "Enter your Skylight email and password."
+    },
+    "abort": {
+      "skylight_failed": "Skylight did not respond as expected. Nothing was changed. Check the Home Assistant log for details.",
+      "skylight_no_frames": "No Skylight devices were found on that account.",
+      "skylight_no_profiles": "That Skylight has no profiles to assign chores to."
+    }
+  },
+  "services": {
+    "complete_chore": {
+      "name": "Complete chore",
+      "description": "Marks a chore done and restarts its interval.",
+      "fields": {
+        "chore_id": { "name": "Chore ID", "description": "The chore's id. Use this or the name." },
+        "chore": { "name": "Chore name", "description": "Exact chore name." },
+        "zone": { "name": "Zone", "description": "Zone name, needed when several rooms have a chore with this name." },
+        "by": { "name": "Done by", "description": "Person to credit." }
+      }
+    },
+    "snooze_chore": {
+      "name": "Snooze chore",
+      "description": "Hides a due chore for a number of days.",
+      "fields": {
+        "chore_id": { "name": "Chore ID", "description": "The chore's id. Use this or the name." },
+        "chore": { "name": "Chore name", "description": "Exact chore name." },
+        "zone": { "name": "Zone", "description": "Zone name." },
+        "days": { "name": "Days", "description": "How long to snooze." }
+      }
+    },
+    "make_due": {
+      "name": "Make chore due",
+      "description": "Marks a chore as due right now, whatever its interval says.",
+      "fields": {
+        "chore_id": { "name": "Chore ID", "description": "The chore's id. Use this or the name." },
+        "chore": { "name": "Chore name", "description": "Exact chore name." },
+        "zone": { "name": "Zone", "description": "Zone name." }
+      }
+    },
+    "add_chore": {
+      "name": "Add chore",
+      "description": "Adds a chore, creating the zone if needed.",
+      "fields": {
+        "zone": { "name": "Zone", "description": "Zone name." },
+        "name": { "name": "Name", "description": "Chore name." },
+        "every": { "name": "Every", "description": "Interval length." },
+        "unit": { "name": "Unit", "description": "Interval unit." },
+        "months": { "name": "Fixed months", "description": "Month numbers for a chore tied to specific months instead of an interval." },
+        "effort": { "name": "Effort", "description": "Points earned, 1 to 3." },
+        "assignees": { "name": "Assignees", "description": "People responsible." },
+        "rotate": { "name": "Rotate", "description": "Take turns between the assignees." }
+      }
+    },
+    "import_data": {
+      "name": "Import chores",
+      "description": "Loads zones and chores from a structured list.",
+      "fields": {
+        "data": { "name": "Data", "description": "An object with a zones list." },
+        "replace": { "name": "Replace", "description": "Delete all existing zones and chores first." },
+        "stagger": { "name": "Stagger", "description": "Spread starting conditions so everything is not due at once." }
+      }
+    },
+    "export_data": {
+      "name": "Export chores",
+      "description": "Returns all zones and chores in the import format."
+    },
+    "set_vacation": {
+      "name": "Set vacation mode",
+      "description": "Freezes or resumes every chore's clock.",
+      "fields": {
+        "active": { "name": "Active", "description": "Whether vacation mode is on." }
+      }
+    },
+    "send_reminders": {
+      "name": "Send reminders now",
+      "description": "Sends one kind of reminder immediately, whether or not it is switched on. Useful for testing.",
+      "fields": {
+        "kind": { "name": "Kind", "description": "digest, push or announce." }
+      }
+    },
+    "sync_now": {
+      "name": "Sync now",
+      "description": "Runs the calendar bridge and Skylight sync immediately."
+    }
+  }
+}
