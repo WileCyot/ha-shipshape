@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
@@ -10,10 +11,12 @@ from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .entity import ShipshapeEntity
 from .manager import ShipshapeManager
+from .skylight_agenda import describe
 
 
 async def async_setup_entry(
@@ -26,6 +29,9 @@ async def async_setup_entry(
         SummarySensor(manager, entry, "on_track", "On track", "mdi:sparkles"),
     ]
     entities.extend(PersonPointsSensor(manager, entry, person) for person in manager.participants())
+    agenda = hass.data[DOMAIN].get("agenda")
+    if agenda is not None and agenda.enabled:
+        entities.append(SkylightTodaySensor(manager, entry, agenda))
     async_add_entities(entities)
 
     known: dict[str, ZoneSensor] = {}
@@ -149,4 +155,37 @@ class PersonPointsSensor(ShipshapeEntity, SensorEntity):
             "points_30d": p30,
             "completed_30d": c30,
             "due": len(self.manager.due_chores(self._person)),
+        }
+
+
+class SkylightTodaySensor(ShipshapeEntity, SensorEntity):
+    """How many Skylight calendar events are on today, with the details as attributes."""
+
+    _attr_name = "Skylight today"
+    _attr_icon = "mdi:calendar-today"
+    _attr_native_unit_of_measurement = "events"
+
+    def __init__(self, manager, entry, agenda) -> None:
+        super().__init__(manager, entry, "skylight_today")
+        self._agenda = agenda
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._agenda.async_add_listener(self._handle_change))
+
+    @property
+    def available(self) -> bool:
+        return self._agenda.updated is not None
+
+    @property
+    def native_value(self) -> int:
+        return len(self._agenda.on_day(dt_util.now().date()))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        today = dt_util.now().date()
+        return {
+            "events": [describe(e) for e in self._agenda.on_day(today)][:25],
+            "tomorrow": [describe(e) for e in self._agenda.on_day(today + timedelta(days=1))][:25],
+            "updated": self._agenda.updated.isoformat() if self._agenda.updated else None,
         }

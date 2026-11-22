@@ -26,6 +26,8 @@ from .const import (
     CONF_SKYLIGHT_ENABLED,
     CONF_SKYLIGHT_FRAME,
     CONF_SKYLIGHT_PROFILE_MAP,
+    CONF_SKYLIGHT_STARS,
+    CONF_SKYLIGHT_UP_FOR_GRABS,
 )
 from .manager import ShipshapeError, ShipshapeManager
 from .models import parse_date
@@ -74,6 +76,17 @@ class SkylightSync:
             and self.manager.options.get(CONF_SKYLIGHT_DEFAULT_PROFILE)
             and (self._state.get("auth") or {}).get("access_token")
         )
+
+    @property
+    def signed_in(self) -> bool:
+        return bool((self._state.get("auth") or {}).get("access_token"))
+
+    @property
+    def backing_off(self) -> bool:
+        return self.hass.loop.time() < self._backoff_until
+
+    def back_off(self, seconds: float = 1800) -> None:
+        self._backoff_until = self.hass.loop.time() + seconds
 
     @callback
     def store_tokens(self, tokens: dict[str, Any]) -> None:
@@ -148,11 +161,25 @@ class SkylightSync:
                 _LOGGER.warning("Skylight sync failed: %s", err)
 
     # ------------------------------------------------------------------
-    def _category_for(self, view: dict[str, Any]) -> str:
+    def _plan_for(self, view: dict[str, Any]) -> tuple[str | None, bool]:
+        """(profile to assign to, up for grabs?) for a chore about to be sent."""
         profile_map: dict[str, str] = self.manager.options.get(CONF_SKYLIGHT_PROFILE_MAP) or {}
         for person in view.get("responsible") or []:
             if profile_map.get(person):
-                return str(profile_map[person])
+                return str(profile_map[person]), False
+        if self.manager.options.get(CONF_SKYLIGHT_UP_FOR_GRABS):
+            return None, True
+        return str(self.manager.options.get(CONF_SKYLIGHT_DEFAULT_PROFILE)), False
+
+    def _stars(self, view: dict[str, Any]) -> int | None:
+        per_effort = int(self.manager.options.get(CONF_SKYLIGHT_STARS) or 0)
+        return per_effort * int(view.get("effort") or 1) or None
+
+    def _category_of(self, person: str | None) -> str:
+        """Skylight profile to credit for something a person did here."""
+        profile_map: dict[str, str] = self.manager.options.get(CONF_SKYLIGHT_PROFILE_MAP) or {}
+        if person and profile_map.get(person):
+            return str(profile_map[person])
         return str(self.manager.options.get(CONF_SKYLIGHT_DEFAULT_PROFILE))
 
     def _person_for(self, category_id: str | None) -> str | None:
@@ -164,11 +191,14 @@ class SkylightSync:
                 return person
         return None
 
-    def _last_history_id(self, chore_id: str) -> str | None:
+    def _last_history(self, chore_id: str) -> dict[str, Any]:
         for entry in reversed(self.manager.data["history"]):
             if entry.get("chore_id") == chore_id:
-                return entry.get("id")
-        return None
+                return entry
+        return {}
+
+    def _last_history_id(self, chore_id: str) -> str | None:
+        return self._last_history(chore_id).get("id")
 
     def _due_view(self, chore_id: str) -> dict[str, Any] | None:
         return next((v for v in self.manager.due_chores() if v["id"] == chore_id), None)
@@ -228,7 +258,11 @@ class SkylightSync:
                 if view is None:
                     continue
                 due[chore_id] = view
-            mapped[chore_id] = {"sid": rec["sid"], "start": rec.get("start") or today.isoformat()}
+            mapped[chore_id] = {
+                "sid": rec["sid"],
+                "start": rec.get("start") or today.isoformat(),
+                "ufg": bool(rec.get("ufg")),
+            }
 
         # --- chores we are tracking as open on the display ----------------
         for chore_id, rec in list(mapped.items()):
@@ -262,6 +296,7 @@ class SkylightSync:
                     done[chore_id] = {
                         "sid": rec["sid"],
                         "start": rec.get("start"),
+                        "ufg": bool(rec.get("ufg")),
                         "history_id": history_id,
                         "day": today.isoformat(),
                     }
@@ -272,10 +307,18 @@ class SkylightSync:
                 exists = chore_id in self.manager.data["chores"]
                 snoozed = exists and self.manager.data["chores"][chore_id].get("snooze_until")
                 if exists and not snoozed:
-                    await client.set_chore_status(frame, rec["sid"], "complete")
+                    # An up-for-grabs chore needs to be told who did it, which
+                    # is also who gets its stars.
+                    who = (
+                        self._category_of(self._last_history(chore_id).get("by"))
+                        if rec.get("ufg")
+                        else None
+                    )
+                    await client.set_chore_status(frame, rec["sid"], "complete", category_id=who)
                     done[chore_id] = {
                         "sid": rec["sid"],
                         "start": rec.get("start"),
+                        "ufg": bool(rec.get("ufg")),
                         "history_id": self._last_history_id(chore_id),
                         "day": today.isoformat(),
                     }
@@ -291,13 +334,16 @@ class SkylightSync:
                 continue
             if created >= MAX_CREATES_PER_RUN or len(mapped) >= MAX_OPEN_ON_SKYLIGHT:
                 break
+            category, up_for_grabs = self._plan_for(view)
             sid = await client.create_chore(
                 frame,
                 f"{view['zone']}: {view['name']}",
-                self._category_for(view),
                 today.isoformat(),
+                category_id=category,
+                reward_points=self._stars(view),
+                up_for_grabs=up_for_grabs,
             )
-            mapped[chore_id] = {"sid": sid, "start": today.isoformat()}
+            mapped[chore_id] = {"sid": sid, "start": today.isoformat(), "ufg": up_for_grabs}
             self.manager.async_save_quietly()
             created += 1
             await asyncio.sleep(WRITE_PAUSE)

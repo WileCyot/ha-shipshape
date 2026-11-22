@@ -575,6 +575,8 @@ class ShipshapeManager:
                     if parsed is not None and parsed.tzinfo is None:
                         parsed = parsed.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
                     last_done = parsed.isoformat() if parsed else None
+                elif schedule["kind"] == "manual":
+                    last_done = None
                 elif stagger:
                     # Deterministic spread between 10% and 90% of the interval.
                     fraction = 0.1 + ((index * 37) % 81) / 100
@@ -616,6 +618,8 @@ class ShipshapeManager:
                 item: dict[str, Any] = {"name": chore["name"]}
                 if schedule["kind"] == "months":
                     item["months"] = schedule["months"]
+                elif schedule["kind"] == "manual":
+                    item["on_demand"] = True
                 else:
                     item["every"] = schedule["every"]
                     item["unit"] = schedule["unit"]

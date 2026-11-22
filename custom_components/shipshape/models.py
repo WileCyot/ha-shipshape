@@ -20,6 +20,10 @@ MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oc
 
 KIND_INTERVAL = "interval"
 KIND_MONTHS = "months"
+# Never comes due on its own; something (a device trigger, a person, an
+# automation) has to make it due each time.
+KIND_MANUAL = "manual"
+FAR_FUTURE = date(2999, 12, 31)
 
 # A fixed-month chore finished this close to its next start counts for that
 # upcoming period (doing the October swap on September 25th is not "late April").
@@ -75,6 +79,8 @@ def normalize_schedule(raw: Any) -> dict[str, Any]:
     """
     if not isinstance(raw, dict):
         raise ScheduleError("schedule must be an object")
+    if raw.get("kind") == KIND_MANUAL or (raw.get("kind") is None and raw.get("on_demand")):
+        return {"kind": KIND_MANUAL}
     months = raw.get("months")
     kind = raw.get("kind")
     if kind == KIND_MONTHS or (kind is None and months):
@@ -101,6 +107,8 @@ def normalize_schedule(raw: Any) -> dict[str, Any]:
 
 def schedule_label(schedule: dict[str, Any]) -> str:
     """Human label, e.g. 'Every 6 days' or 'Apr, Oct'."""
+    if schedule.get("kind") == KIND_MANUAL:
+        return "When triggered"
     if schedule.get("kind") == KIND_MONTHS:
         return ", ".join(MONTH_ABBR[m - 1] for m in schedule.get("months", []))
     every = schedule.get("every", 1)
@@ -112,6 +120,8 @@ def schedule_label(schedule: dict[str, Any]) -> str:
 
 def next_due_date(schedule: dict[str, Any], last_done: date) -> date:
     """The date a chore next comes due, given the date it was last done."""
+    if schedule.get("kind") == KIND_MANUAL:
+        return FAR_FUTURE
     if schedule.get("kind") == KIND_MONTHS:
         months = schedule.get("months") or [1]
         for step in range(1, 25):
@@ -130,6 +140,8 @@ def next_due_date(schedule: dict[str, Any], last_done: date) -> date:
 
 def approx_interval_days(schedule: dict[str, Any]) -> float:
     """Rough length of one cycle in days (used for staggering and sorting)."""
+    if schedule.get("kind") == KIND_MANUAL:
+        return 0.0
     if schedule.get("kind") == KIND_MONTHS:
         return 365.0 / max(1, len(schedule.get("months") or [1]))
     every = int(schedule.get("every", 1))
@@ -140,6 +152,8 @@ def chore_status(chore: dict[str, Any], now: datetime) -> dict[str, Any]:
     """Compute the live condition of one chore at ``now`` (an aware datetime)."""
     schedule = chore["schedule"]
     today = now.date()
+    if schedule.get("kind") == KIND_MANUAL:
+        return _manual_status(chore, today)
     last = parse_dt(chore.get("last_done"))
     if last is not None and last.tzinfo is not None and now.tzinfo is not None:
         last = last.astimezone(now.tzinfo)
@@ -192,6 +206,28 @@ def chore_status(chore: dict[str, Any], now: datetime) -> dict[str, Any]:
     }
 
 
+def _manual_status(chore: dict[str, Any], today: date) -> dict[str, Any]:
+    """Status of a chore that is only ever due when something makes it due."""
+    forced = bool(chore.get("force_due"))
+    paused = bool(chore.get("paused"))
+    snooze = parse_date(chore.get("snooze_until"))
+    due = today if forced else FAR_FUTURE
+    effective_due = max(due, snooze) if (snooze and forced) else due
+    days_left = (effective_due - today).days
+    is_due = forced and days_left <= 0 and not paused
+    return {
+        "due_date": due.isoformat(),
+        "effective_due": effective_due.isoformat(),
+        "days_left": days_left,
+        "ratio": 1.0 if forced else 0.0,
+        "span_days": 1,
+        "state": "paused" if paused else ("due" if is_due else "ok"),
+        "is_due": is_due,
+        "snoozed": bool(forced and snooze and snooze > today),
+        "on_demand": True,
+    }
+
+
 def projected_dues(
     chore: dict[str, Any], now: datetime, start: date, end: date, limit: int = 40
 ) -> list[date]:
@@ -204,6 +240,8 @@ def projected_dues(
         return []
     status = chore_status(chore, now)
     today = now.date()
+    if chore["schedule"].get("kind") == KIND_MANUAL:
+        return [today] if status["is_due"] and start <= today < end else []
     current = max(parse_date(status["effective_due"]) or today, today)
     out: list[date] = []
     for _ in range(limit * 4):
@@ -243,6 +281,6 @@ def staggered_last_done(schedule: dict[str, Any], now: datetime, fraction: float
     due on the same day.
     """
     fraction = min(max(fraction, 0.0), 0.95)
-    if schedule.get("kind") == KIND_MONTHS:
+    if schedule.get("kind") in (KIND_MONTHS, KIND_MANUAL):
         return now
     return now - timedelta(days=approx_interval_days(schedule) * fraction)

@@ -90,6 +90,25 @@ add_chore:
     rotate:
       selector:
         boolean:
+    on_demand:
+      selector:
+        boolean:
+    trigger_entity:
+      selector:
+        entity:
+    trigger_to:
+      example: finished
+      selector:
+        text:
+    trigger_from:
+      selector:
+        text:
+    trigger_action:
+      selector:
+        select:
+          options:
+            - make_due
+            - complete
 
 import_data:
   fields:

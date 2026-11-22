@@ -24,7 +24,8 @@
           "people": "People and phones",
           "reminders": "Reminders",
           "calendar": "Calendar bridge (Google Calendar, Skylight)",
-          "skylight": "Skylight Chores (unofficial)"
+          "skylight": "Skylight sign-in and profiles (unofficial)",
+          "skylight_features": "Skylight features: stars, lists, calendar"
         }
       },
       "people": {
@@ -99,6 +100,28 @@
         "data": {
           "skylight_default_profile": "Default profile"
         }
+      },
+      "skylight_features": {
+        "title": "Skylight features",
+        "description": "Everything here uses Skylight's private app API and can be switched off on its own.",
+        "data": {
+          "skylight_up_for_grabs": "Send unassigned chores as Up for grabs",
+          "skylight_stars": "Stars per effort point",
+          "skylight_calendar": "Read the Skylight calendar into Home Assistant",
+          "skylight_grocery_enabled": "Sync a grocery list",
+          "skylight_grocery_todo": "Home Assistant grocery list",
+          "skylight_grocery_list": "Skylight grocery list",
+          "skylight_todo_enabled": "Sync a to-do list",
+          "skylight_todo_todo": "Home Assistant to-do list",
+          "skylight_todo_list": "Skylight to-do list"
+        },
+        "data_description": {
+          "skylight_up_for_grabs": "Whoever ticks the chore on the display gets the credit and the stars. Off sends unassigned chores to the default profile instead.",
+          "skylight_stars": "A chore's effort (1 to 3) times this is its star reward on Skylight. 0 sends no stars.",
+          "skylight_calendar": "Adds a Skylight calendar entity and a 'Skylight today' sensor for dashboards.",
+          "skylight_grocery_enabled": "Items added, ticked, renamed or removed on either side are carried to the other. Old ticked-off items are left alone.",
+          "skylight_todo_enabled": "Works the same way as the grocery list."
+        }
       }
     },
     "error": {
@@ -111,7 +134,8 @@
     "abort": {
       "skylight_failed": "Skylight did not respond as expected. Nothing was changed. Check the Home Assistant log for details.",
       "skylight_no_frames": "No Skylight devices were found on that account.",
-      "skylight_no_profiles": "That Skylight has no profiles to assign chores to."
+      "skylight_no_profiles": "That Skylight has no profiles to assign chores to.",
+      "skylight_not_signed_in": "Sign in to Skylight first, under 'Skylight sign-in and profiles'."
     }
   },
   "services": {
@@ -212,6 +236,26 @@
         "rotate": {
           "name": "Rotate",
           "description": "Take turns between the assignees."
+        },
+        "on_demand": {
+          "name": "Only when triggered",
+          "description": "Never comes due by itself; a trigger or the Make chore due action sets it off."
+        },
+        "trigger_entity": {
+          "name": "Trigger entity",
+          "description": "Entity whose state change affects this chore."
+        },
+        "trigger_to": {
+          "name": "Trigger state",
+          "description": "State the entity must change to."
+        },
+        "trigger_from": {
+          "name": "Trigger from state",
+          "description": "Optional state it must change from."
+        },
+        "trigger_action": {
+          "name": "Trigger action",
+          "description": "make_due or complete."
         }
       }
     },
@@ -259,7 +303,7 @@
     },
     "sync_now": {
       "name": "Sync now",
-      "description": "Runs the calendar bridge and Skylight sync immediately."
+      "description": "Runs the calendar bridge and every Skylight sync immediately."
     },
     "skylight_status": {
       "name": "Skylight sync status",

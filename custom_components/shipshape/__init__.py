@@ -19,6 +19,8 @@ from .library import STARTER_LIBRARY
 from .manager import ShipshapeManager
 from .notifications import Notifier
 from .services import async_register_services
+from .skylight_agenda import SkylightAgenda
+from .skylight_lists import SkylightLists
 from .skylight_sync import SkylightSync
 from .websocket_api import async_register_websocket
 
@@ -55,6 +57,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data["notifier"] = notifier = Notifier(hass, manager)
     domain_data["calendar_bridge"] = bridge = CalendarBridge(hass, manager)
     domain_data["skylight"] = skylight = SkylightSync(hass, manager)
+    domain_data["skylight_lists"] = lists = SkylightLists(hass, manager, skylight)
+    domain_data["agenda"] = agenda = SkylightAgenda(hass, manager, skylight)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -62,6 +66,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     notifier.async_start()
     bridge.async_start()
     skylight.async_start()
+    lists.async_start()
+    agenda.async_start()
 
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
@@ -76,7 +82,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         domain_data = hass.data.get(DOMAIN, {})
-        for key in ("skylight", "calendar_bridge", "notifier"):
+        for key in ("agenda", "skylight_lists", "skylight", "calendar_bridge", "notifier"):
             part = domain_data.pop(key, None)
             if part is not None:
                 part.async_stop()

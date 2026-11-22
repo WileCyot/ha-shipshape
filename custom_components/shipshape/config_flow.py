@@ -29,10 +29,19 @@ from .const import (
     CONF_PUSH_ENABLED,
     CONF_PUSH_MAX,
     CONF_PUSH_TIME,
+    CONF_SKYLIGHT_CALENDAR,
     CONF_SKYLIGHT_DEFAULT_PROFILE,
     CONF_SKYLIGHT_ENABLED,
     CONF_SKYLIGHT_FRAME,
+    CONF_SKYLIGHT_GROCERY_ENABLED,
+    CONF_SKYLIGHT_GROCERY_LIST,
+    CONF_SKYLIGHT_GROCERY_TODO,
     CONF_SKYLIGHT_PROFILE_MAP,
+    CONF_SKYLIGHT_STARS,
+    CONF_SKYLIGHT_TODO_ENABLED,
+    CONF_SKYLIGHT_TODO_LIST,
+    CONF_SKYLIGHT_TODO_TODO,
+    CONF_SKYLIGHT_UP_FOR_GRABS,
     DEFAULTS,
     DOMAIN,
 )
@@ -78,6 +87,7 @@ class ShipshapeOptionsFlow(OptionsFlow):
         self._frames: list[dict[str, Any]] = []
         self._categories: list[dict[str, Any]] = []
         self._person_fields: dict[str, str] = {}
+        self._lists: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     def _opts(self) -> dict[str, Any]:
@@ -94,7 +104,7 @@ class ShipshapeOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
-            step_id="init", menu_options=["people", "reminders", "calendar", "skylight"]
+            step_id="init", menu_options=["people", "reminders", "calendar", "skylight", "skylight_features"]
         )
 
     # ------------------------------------------------------------------
@@ -368,3 +378,93 @@ class ShipshapeOptionsFlow(OptionsFlow):
                 selector.SelectSelectorConfig(options=options, mode=selector.SelectSelectorMode.DROPDOWN)
             )
         return self.async_show_form(step_id="skylight_profiles", data_schema=vol.Schema(schema))
+
+    # ------------------------------------------------------------------
+    async def async_step_skylight_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Stars, up for grabs, list links and calendar reading."""
+        opts = self._opts()
+        if not self._signed_in() or not opts[CONF_SKYLIGHT_FRAME]:
+            return self.async_abort(reason="skylight_not_signed_in")
+        if not self._lists:
+            try:
+                self._lists = await self._sync().client().lists(opts[CONF_SKYLIGHT_FRAME])
+            except (SkylightError, aiohttp.ClientError, asyncio.TimeoutError) as err:
+                _LOGGER.warning("Could not read Skylight lists: %s", err)
+                return self.async_abort(reason="skylight_failed")
+        if user_input is not None:
+            return self._finish(
+                {
+                    CONF_SKYLIGHT_UP_FOR_GRABS: bool(user_input.get(CONF_SKYLIGHT_UP_FOR_GRABS)),
+                    CONF_SKYLIGHT_STARS: int(user_input.get(CONF_SKYLIGHT_STARS, 0)),
+                    CONF_SKYLIGHT_CALENDAR: bool(user_input.get(CONF_SKYLIGHT_CALENDAR)),
+                    CONF_SKYLIGHT_GROCERY_ENABLED: bool(user_input.get(CONF_SKYLIGHT_GROCERY_ENABLED)),
+                    CONF_SKYLIGHT_GROCERY_TODO: user_input.get(CONF_SKYLIGHT_GROCERY_TODO) or None,
+                    CONF_SKYLIGHT_GROCERY_LIST: user_input.get(CONF_SKYLIGHT_GROCERY_LIST) or "",
+                    CONF_SKYLIGHT_TODO_ENABLED: bool(user_input.get(CONF_SKYLIGHT_TODO_ENABLED)),
+                    CONF_SKYLIGHT_TODO_TODO: user_input.get(CONF_SKYLIGHT_TODO_TODO) or None,
+                    CONF_SKYLIGHT_TODO_LIST: user_input.get(CONF_SKYLIGHT_TODO_LIST) or "",
+                }
+            )
+
+        list_options = [selector.SelectOptionDict(value=l["id"], label=l["label"]) for l in self._lists]
+        valid = {l["id"] for l in self._lists}
+
+        def guess_list(current: str, kind: str) -> str | None:
+            if current in valid:
+                return current
+            return next((l["id"] for l in self._lists if l.get("kind") == kind), None)
+
+        def guess_todo(current: str | None, fallback: str) -> str | None:
+            if current and self.hass.states.get(current):
+                return current
+            return fallback if self.hass.states.get(fallback) else None
+
+        own = [
+            state.entity_id
+            for state in self.hass.states.async_all("todo")
+            if state.entity_id.startswith("todo.shipshape_")
+        ]
+        todo_selector = selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="todo", exclude_entities=own)
+        )
+        list_selector = selector.SelectSelector(
+            selector.SelectSelectorConfig(options=list_options, mode=selector.SelectSelectorMode.DROPDOWN)
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_SKYLIGHT_UP_FOR_GRABS, default=opts[CONF_SKYLIGHT_UP_FOR_GRABS]
+                ): selector.BooleanSelector(),
+                vol.Required(CONF_SKYLIGHT_STARS, default=opts[CONF_SKYLIGHT_STARS]): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=50, step=1, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required(
+                    CONF_SKYLIGHT_CALENDAR, default=opts[CONF_SKYLIGHT_CALENDAR]
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_SKYLIGHT_GROCERY_ENABLED, default=opts[CONF_SKYLIGHT_GROCERY_ENABLED]
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_SKYLIGHT_GROCERY_TODO,
+                    description={
+                        "suggested_value": guess_todo(opts[CONF_SKYLIGHT_GROCERY_TODO], "todo.shopping_list")
+                    },
+                ): todo_selector,
+                vol.Optional(
+                    CONF_SKYLIGHT_GROCERY_LIST,
+                    description={"suggested_value": guess_list(opts[CONF_SKYLIGHT_GROCERY_LIST], "shopping")},
+                ): list_selector,
+                vol.Required(
+                    CONF_SKYLIGHT_TODO_ENABLED, default=opts[CONF_SKYLIGHT_TODO_ENABLED]
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_SKYLIGHT_TODO_TODO,
+                    description={"suggested_value": guess_todo(opts[CONF_SKYLIGHT_TODO_TODO], "todo.to_do")},
+                ): todo_selector,
+                vol.Optional(
+                    CONF_SKYLIGHT_TODO_LIST,
+                    description={"suggested_value": guess_list(opts[CONF_SKYLIGHT_TODO_LIST], "to_do")},
+                ): list_selector,
+            }
+        )
+        return self.async_show_form(step_id="skylight_features", data_schema=schema)

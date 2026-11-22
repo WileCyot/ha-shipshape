@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "shipshape"
-VERSION = "0.1.3"
+VERSION = "0.2.0"
 
 STORAGE_KEY = DOMAIN
 STORAGE_VERSION = 1
@@ -40,6 +40,15 @@ CONF_SKYLIGHT_PASSWORD = "skylight_password"
 CONF_SKYLIGHT_FRAME = "skylight_frame"
 CONF_SKYLIGHT_PROFILE_MAP = "skylight_profile_map"  # {person_entity_id: category_id}
 CONF_SKYLIGHT_DEFAULT_PROFILE = "skylight_default_profile"
+CONF_SKYLIGHT_UP_FOR_GRABS = "skylight_up_for_grabs"
+CONF_SKYLIGHT_STARS = "skylight_stars"
+CONF_SKYLIGHT_CALENDAR = "skylight_calendar"
+CONF_SKYLIGHT_GROCERY_ENABLED = "skylight_grocery_enabled"
+CONF_SKYLIGHT_GROCERY_TODO = "skylight_grocery_todo"
+CONF_SKYLIGHT_GROCERY_LIST = "skylight_grocery_list"
+CONF_SKYLIGHT_TODO_ENABLED = "skylight_todo_enabled"
+CONF_SKYLIGHT_TODO_TODO = "skylight_todo_todo"
+CONF_SKYLIGHT_TODO_LIST = "skylight_todo_list"
 
 DEFAULTS: dict = {
     CONF_PARTICIPANTS: [],
@@ -62,6 +71,15 @@ DEFAULTS: dict = {
     CONF_SKYLIGHT_FRAME: "",
     CONF_SKYLIGHT_PROFILE_MAP: {},
     CONF_SKYLIGHT_DEFAULT_PROFILE: "",
+    CONF_SKYLIGHT_UP_FOR_GRABS: True,
+    CONF_SKYLIGHT_STARS: 1,
+    CONF_SKYLIGHT_CALENDAR: True,
+    CONF_SKYLIGHT_GROCERY_ENABLED: False,
+    CONF_SKYLIGHT_GROCERY_TODO: None,
+    CONF_SKYLIGHT_GROCERY_LIST: "",
+    CONF_SKYLIGHT_TODO_ENABLED: False,
+    CONF_SKYLIGHT_TODO_TODO: None,
+    CONF_SKYLIGHT_TODO_LIST: "",
 }
 
 ACTION_DONE = "SHIPSHAPE_DONE_"

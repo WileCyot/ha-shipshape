@@ -11,7 +11,7 @@ Most chore trackers nag you on fixed dates. Shipshape works the other way round:
 - **People.** Assign chores, take turns automatically, earn effort points, see a weekly leaderboard.
 - **Vacation mode.** Freezes every chore so you do not come home to a wall of red.
 - **Reminders**, each optional: a morning digest, pushes with Done and Snooze buttons, and spoken announcements.
-- **Device triggers.** Let an entity complete a chore (robot vacuum docks) or make one due (dishwasher finishes).
+- **Device triggers.** Let an entity complete a chore (robot vacuum docks) or make one due (dishwasher finishes). Chores can be trigger-only, so "Unload dishwasher" exists only when the dishwasher has actually finished.
 - **Native entities.** To-do lists, a calendar, sensors per zone and per person, so chores work with voice assistants, automations and other dashboards.
 - **Calendar bridge.** Mirrors due chores into any writable calendar, such as a Google calendar that a Skylight display syncs. Deleting the event on the display can mark the chore done.
 - **Skylight Chores sync** (unofficial, best effort). Sends due chores to Skylight's own Chores and reads completions back.
@@ -56,6 +56,17 @@ There are two ways to get chores onto a Skylight display. They can be used toget
 
 **Skylight Chores (unofficial).** Skylight has no public API. This talks to the private API the Skylight app uses, as worked out by community projects. It can break whenever Skylight changes their app, and Skylight does not support it. When it works: due chores show up as real Skylight chores, ticking one off on the display completes it in Home Assistant, un-ticking it reopens it, and deleting one snoozes it for a day. Sign-in may ask for a code that Skylight emails to the account owner. Your password is used once and is not stored; only the session tokens are kept.
 
+### Skylight features
+
+Under **Configure → Skylight features**, each of these has its own switch:
+
+- **Up for grabs.** Chores with no assignee are sent as *Up for grabs*, so whoever ticks one on the display gets the credit in Home Assistant. Chores assigned to a person go to that person's Skylight profile.
+- **Stars.** A chore's effort (1 to 3) times *Stars per effort point* becomes its star reward on Skylight. Completing a chore in Home Assistant awards the stars to the profile of whoever did it.
+- **Grocery and to-do lists.** Link a Home Assistant to-do list to a Skylight list. Adding, ticking, un-ticking, renaming and deleting carry across in both directions. Items already ticked off on Skylight before linking are left alone.
+- **Calendar reading.** Adds `calendar.shipshape_skylight` and `sensor.shipshape_skylight_today` (today's and tomorrow's events as attributes) for dashboards and announcements.
+
+Un-ticking a finished chore on the display reopens it in Home Assistant, and deleting one snoozes it for a day.
+
 ## Actions
 
 | Action | Purpose |
@@ -67,7 +78,9 @@ There are two ways to get chores onto a Skylight display. They can be used toget
 | `shipshape.import_data` / `export_data` | Bulk load or dump zones and chores |
 | `shipshape.set_vacation` | Freeze or resume all chores |
 | `shipshape.send_reminders` | Send a digest, push or announcement now |
-| `shipshape.sync_now` | Run the calendar bridge and Skylight sync now |
+| `shipshape.sync_now` | Run the calendar bridge and every Skylight sync now |
+| `shipshape.skylight_status` | What the Skylight sync is tracking (admin, troubleshooting) |
+| `shipshape.skylight_api` | One raw call to Skylight's private API (admin, troubleshooting) |
 
 Completing a chore fires a `shipshape_chore_completed` event with the chore, zone, person and points.
 
@@ -105,6 +118,8 @@ The scheduling logic in `custom_components/shipshape/models.py` has no Home Assi
 ```
 pytest tests
 ```
+
+`tests/check_skylight_sync.py` and `tests/check_skylight_lists.py` run the Skylight logic against fakes. They need Home Assistant importable, so run them inside a Home Assistant container (see the top of each file).
 
 ## License
 

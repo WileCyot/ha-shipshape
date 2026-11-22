@@ -62,7 +62,9 @@ def async_register_services(hass: HomeAssistant) -> None:
         if zone is None:
             zone = manager.save_zone({"name": call.data["zone"]})
         schedule: dict[str, Any]
-        if call.data.get("months"):
+        if call.data.get("on_demand"):
+            schedule = {"on_demand": True}
+        elif call.data.get("months"):
             schedule = {"months": call.data["months"]}
         else:
             schedule = {"every": call.data.get("every", 1), "unit": call.data.get("unit", "weeks")}
@@ -75,6 +77,13 @@ def async_register_services(hass: HomeAssistant) -> None:
             "rotate": call.data.get("rotate", False),
             "condition": 0.0,
         }
+        if call.data.get("trigger_entity"):
+            payload["trigger"] = {
+                "entity_id": call.data["trigger_entity"],
+                "to": call.data.get("trigger_to", ""),
+                "from": call.data.get("trigger_from", ""),
+                "action": call.data.get("trigger_action", "make_due"),
+            }
         manager.save_chore(payload)
 
     @callback
@@ -99,6 +108,10 @@ def async_register_services(hass: HomeAssistant) -> None:
             await bridge.async_sync()
         if (skylight := data.get("skylight")) is not None:
             await skylight.async_sync()
+        if (lists := data.get("skylight_lists")) is not None:
+            await lists.async_sync()
+        if (agenda := data.get("agenda")) is not None:
+            await agenda.async_refresh()
 
     async def send_reminders(call: ServiceCall) -> ServiceResponse:
         notifier = hass.data.get(DOMAIN, {}).get("notifier")
@@ -140,7 +153,12 @@ def async_register_services(hass: HomeAssistant) -> None:
             "options": {k: v for k, v in opts.items() if k.startswith("skylight_")},
             "open": state.get("chores", {}),
             "watching": state.get("done", {}),
-            "lists": state.get("lists", {}),
+            "lists": {
+                key: {"todo": link.get("todo"), "list": link.get("list"), "paired": len(link.get("pairs", {}))}
+                for key, link in state.get("lists", {}).items()
+            },
+            "list_error": getattr(hass.data.get(DOMAIN, {}).get("skylight_lists"), "last_error", None),
+            "calendar_error": getattr(hass.data.get(DOMAIN, {}).get("agenda"), "last_error", None),
         }
 
     async def skylight_api(call: ServiceCall) -> ServiceResponse:
@@ -208,6 +226,11 @@ def async_register_services(hass: HomeAssistant) -> None:
                 vol.Optional("effort"): vol.All(int, vol.Range(1, 3)),
                 vol.Optional("assignees"): cv.entity_ids,
                 vol.Optional("rotate"): cv.boolean,
+                vol.Optional("on_demand"): cv.boolean,
+                vol.Optional("trigger_entity"): cv.entity_id,
+                vol.Optional("trigger_to"): cv.string,
+                vol.Optional("trigger_from"): cv.string,
+                vol.Optional("trigger_action"): vol.In(["complete", "make_due"]),
             }
         ),
     )

@@ -188,3 +188,32 @@ def test_staggered_last_done_spreads():
     # Never produces an already-due chore.
     capped = models.staggered_last_done(sched, NOW, 5)
     assert not models.chore_status({"schedule": sched, "last_done": capped.isoformat()}, NOW)["is_due"]
+
+
+def test_on_demand_schedule():
+    assert models.normalize_schedule({"on_demand": True}) == {"kind": "manual"}
+    assert models.normalize_schedule({"kind": "manual"}) == {"kind": "manual"}
+    assert models.schedule_label({"kind": "manual"}) == "When triggered"
+    c = chore({"on_demand": True})
+    status = models.chore_status(c, NOW)
+    assert not status["is_due"] and status["state"] == "ok" and status["ratio"] == 0.0
+    assert status["days_left"] > 300000  # never shows up as "coming up"
+    assert not models.chore_status(chore({"on_demand": True}, ago(900)), NOW)["is_due"]
+    c["force_due"] = True
+    status = models.chore_status(c, NOW)
+    assert status["is_due"] and status["state"] == "due" and status["due_date"] == "2026-11-22"
+    c["snooze_until"] = "2026-11-24"
+    status = models.chore_status(c, NOW)
+    assert not status["is_due"] and status["snoozed"] and status["days_left"] == 2
+    c["snooze_until"] = None
+    c["paused"] = True
+    assert models.chore_status(c, NOW)["state"] == "paused"
+
+
+def test_on_demand_projection_and_completion():
+    c = chore({"on_demand": True})
+    assert models.projected_dues(c, NOW, date(2026, 11, 1), date(2027, 11, 1)) == []
+    c["force_due"] = True
+    assert models.projected_dues(c, NOW, date(2026, 11, 1), date(2027, 11, 1)) == [date(2026, 11, 22)]
+    assert models.completion_timestamp(c, NOW) == NOW
+    assert models.staggered_last_done(c["schedule"], NOW, 0.5) == NOW

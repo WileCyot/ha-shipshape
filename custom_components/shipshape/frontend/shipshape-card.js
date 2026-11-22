@@ -1,5 +1,5 @@
 /* Shipshape dashboard card. Vanilla custom element, no build step. */
-const SHIPSHAPE_VERSION = "0.1.3";
+const SHIPSHAPE_VERSION = "0.2.0";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const ZONE_ICONS = [
@@ -21,6 +21,7 @@ function meterColor(ratio) {
 
 function dueText(chore) {
   if (chore.state === "paused") return "Paused";
+  if (chore.on_demand && !chore.is_due && !chore.snoozed) return "Waiting for its trigger";
   const d = chore.days_left;
   if (chore.snoozed) return `Snoozed, back in ${plural(d, "day")}`;
   if (d < 0) return `${plural(-d, "day")} overdue`;
@@ -480,6 +481,7 @@ class ShipshapeCard extends HTMLElement {
     const existing = d.id ? this._chore(d.id) : null;
     const people = this._snap.people || [];
     const isMonths = c.schedule.kind === "months";
+    const isManual = c.schedule.kind === "manual";
     const zones = this._snap.zones;
     let top = "";
     if (existing) {
@@ -496,6 +498,7 @@ class ShipshapeCard extends HTMLElement {
           <button class="btn grow" data-action="snooze" data-days="3">3 days</button>
           <button class="btn grow" data-action="snooze" data-days="7">1 week</button>
         </div>
+        ${existing.is_due ? "" : `<div class="btns"><button class="btn grow" data-action="make-due">Make due now</button></div>`}
         <details ${d.editing ? "open" : ""}><summary>Edit chore</summary>`;
     }
     const lib = !existing && d.suggestions && d.suggestions.length
@@ -509,10 +512,13 @@ class ShipshapeCard extends HTMLElement {
       <select id="c-zone">${zones.map((z) => `<option value="${esc(z.id)}" ${z.id === c.zone_id ? "selected" : ""}>${esc(z.name)}</option>`).join("")}</select>
       <label>Repeat</label>
       <div class="opts">
-        <button class="opt ${isMonths ? "" : "on"}" data-action="kind" data-kind="interval">Every…</button>
+        <button class="opt ${isMonths || isManual ? "" : "on"}" data-action="kind" data-kind="interval">Every…</button>
         <button class="opt ${isMonths ? "on" : ""}" data-action="kind" data-kind="months">In fixed months</button>
+        <button class="opt ${isManual ? "on" : ""}" data-action="kind" data-kind="manual">Only when triggered</button>
       </div>
-      ${isMonths
+      ${isManual
+        ? `<div class="hint" style="margin-top:8px">Never comes due by itself. Set an automatic trigger below (for example a dishwasher finishing), or use the Make due button or the shipshape.make_due action.</div>`
+        : isMonths
         ? `<div class="opts" style="margin-top:8px">${MONTHS.map((m, i) => `<button class="opt ${c.schedule.months.includes(i + 1) ? "on" : ""}" data-action="month" data-month="${i + 1}">${m}</button>`).join("")}</div>`
         : `<div class="two" style="margin-top:8px">
             <input type="number" id="c-every" min="1" max="3650" value="${esc(c.schedule.every)}" aria-label="Every">
@@ -715,6 +721,12 @@ class ShipshapeCard extends HTMLElement {
         this._closeDialog();
         return this._showToast(`Snoozed for ${plural(parseInt(data.days, 10), "day")}`);
       }
+      case "make-due": {
+        const id = d.id;
+        await this._hass.callService("shipshape", "make_due", { chore_id: id });
+        this._closeDialog();
+        return this._showToast("Made due");
+      }
       case "undo":
         await this._ws("shipshape/undo", { history_id: data.id || null });
         return this._showToast("Undone");
@@ -800,7 +812,9 @@ class ShipshapeCard extends HTMLElement {
     this._readChoreForm();
     const d = this._dialog;
     const c = d.draft;
-    const schedule = c.schedule.kind === "months" ? { kind: "months", months: c.schedule.months } : { kind: "interval", every: c.schedule.every, unit: c.schedule.unit };
+    const schedule = c.schedule.kind === "manual"
+      ? { kind: "manual" }
+      : c.schedule.kind === "months" ? { kind: "months", months: c.schedule.months } : { kind: "interval", every: c.schedule.every, unit: c.schedule.unit };
     if (schedule.kind === "months" && !schedule.months.length) throw new Error("Pick at least one month");
     const payload = {
       name: c.name,

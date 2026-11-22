@@ -330,34 +330,104 @@ class SkylightClient:
         out = []
         for item in (data or {}).get("data", []):
             attrs = item.get("attributes") or {}
-            rel = item.get("relationships") or {}
-
-            def _rel_id(key: str) -> str | None:
-                value = (rel.get(key) or {}).get("data")
-                if isinstance(value, list):
-                    value = value[0] if value else None
-                return str(value["id"]) if isinstance(value, dict) and value.get("id") else None
-
             out.append(
                 {
                     "id": str(item["id"]),
                     "summary": attrs.get("summary"),
                     "status": attrs.get("status"),
                     "start": attrs.get("start"),
-                    "category_id": _rel_id("category"),
-                    "completed_category_id": _rel_id("completed_category"),
+                    "up_for_grabs": bool(attrs.get("up_for_grabs")),
+                    "reward_points": attrs.get("reward_points"),
+                    "category_id": _rel_id(item, "category"),
+                    "completed_category_id": _rel_id(item, "completed_category"),
+                }
+            )
+        return out
+
+    async def lists(self, frame: str) -> list[dict[str, Any]]:
+        """Every list on the frame with its items."""
+        data = await self._request("GET", f"/frames/{frame}/lists")
+        items: dict[str, dict[str, Any]] = {}
+        for inc in (data or {}).get("included") or []:
+            if inc.get("type") != "list_item":
+                continue
+            attrs = inc.get("attributes") or {}
+            items[str(inc["id"])] = {
+                "id": str(inc["id"]),
+                "label": attrs.get("label") or "",
+                "status": "completed" if attrs.get("status") == "completed" else "pending",
+                "section": attrs.get("section"),
+            }
+        out = []
+        for item in (data or {}).get("data", []):
+            attrs = item.get("attributes") or {}
+            refs = ((item.get("relationships") or {}).get("list_items") or {}).get("data") or []
+            out.append(
+                {
+                    "id": str(item["id"]),
+                    "label": attrs.get("label") or str(item["id"]),
+                    "kind": attrs.get("kind"),
+                    "items": [items[str(r["id"])] for r in refs if str(r.get("id")) in items],
+                }
+            )
+        return out
+
+    async def calendar_events(
+        self, frame: str, date_min: str, date_max: str, timezone: str
+    ) -> list[dict[str, Any]]:
+        """Events between date_min (inclusive) and date_max (exclusive)."""
+        data = await self._request(
+            "GET",
+            f"/frames/{frame}/calendar_events",
+            params={"date_min": date_min, "date_max": date_max, "timezone": timezone},
+        )
+        labels = {
+            str(inc["id"]): (inc.get("attributes") or {}).get("label")
+            for inc in (data or {}).get("included") or []
+            if inc.get("type") == "category"
+        }
+        out = []
+        for item in (data or {}).get("data", []):
+            attrs = item.get("attributes") or {}
+            category = _rel_id(item, "category")
+            out.append(
+                {
+                    "id": str(item["id"]),
+                    "summary": attrs.get("summary") or "",
+                    "starts_at": attrs.get("starts_at"),
+                    "ends_at": attrs.get("ends_at"),
+                    "all_day": bool(attrs.get("all_day")),
+                    "description": attrs.get("description"),
+                    "location": attrs.get("location"),
+                    "category_id": category,
+                    "category": labels.get(category or ""),
                 }
             )
         return out
 
     # --- writes ----------------------------------------------------------
     async def create_chore(
-        self, frame: str, summary: str, category_id: str, start: str, description: str | None = None
+        self,
+        frame: str,
+        summary: str,
+        start: str,
+        category_id: str | None = None,
+        reward_points: int | None = None,
+        up_for_grabs: bool = False,
     ) -> str:
-        body: dict[str, Any] = {"summary": summary, "category_id": category_id, "start": start}
-        if description:
-            body["description"] = description
-        data = await self._request("POST", f"/frames/{frame}/chores", body=body)
+        """Create a one-off chore, assigned to a profile or up for grabs."""
+        body: dict[str, Any] = {"summary": summary, "start": start}
+        if reward_points:
+            body["reward_points"] = int(reward_points)
+        if up_for_grabs:
+            # Unassigned chores only exist through this endpoint.
+            body.update({"up_for_grabs": True, "category_ids": [], "routine": False})
+            data = await self._request("POST", f"/frames/{frame}/chores/create_multiple", body=body)
+        else:
+            if not category_id:
+                raise SkylightError("An assigned Skylight chore needs a profile")
+            body["category_id"] = int(category_id) if str(category_id).isdigit() else category_id
+            data = await self._request("POST", f"/frames/{frame}/chores", body=body)
         item = (data or {}).get("data")
         if isinstance(item, list):
             item = item[0] if item else None
@@ -365,15 +435,50 @@ class SkylightClient:
             raise SkylightError("Skylight did not return the chore it created")
         return str(item["id"])
 
-    async def set_chore_status(self, frame: str, chore_id: str, status: str = "complete") -> None:
+    async def set_chore_status(
+        self, frame: str, chore_id: str, status: str = "complete", category_id: str | None = None
+    ) -> None:
+        """Tick or un-tick a chore. category_id says who did an up-for-grabs one."""
         base = chore_id
         body: dict[str, Any] = {"status": status}
         match = re.match(r"^(\d+)-(\d{4}-\d{2}-\d{2})", chore_id)
         if match:
             base = match.group(1)
             body["instance_date"] = match.group(2)
+        if category_id and status == "complete":
+            body["category_id"] = int(category_id) if str(category_id).isdigit() else category_id
         await self._request("PUT", f"/frames/{frame}/chores/{base}/completions", body=body)
 
     async def delete_chore(self, frame: str, chore_id: str) -> None:
         params = {"apply_to": "one"} if "-" in chore_id else None
         await self._request("DELETE", f"/frames/{frame}/chores/{chore_id}", params=params)
+
+    async def add_list_item(self, frame: str, list_id: str, label: str) -> str:
+        data = await self._request(
+            "POST", f"/frames/{frame}/lists/{list_id}/list_items", body={"label": label, "section": None}
+        )
+        item = (data or {}).get("data")
+        if not isinstance(item, dict) or not item.get("id"):
+            raise SkylightError("Skylight did not return the list item it created")
+        return str(item["id"])
+
+    async def update_list_item(
+        self, frame: str, list_id: str, item_id: str, status: str | None = None, label: str | None = None
+    ) -> None:
+        body: dict[str, Any] = {}
+        if status is not None:
+            body["status"] = status
+        if label is not None:
+            body["label"] = label
+        if body:
+            await self._request("PUT", f"/frames/{frame}/lists/{list_id}/list_items/{item_id}", body=body)
+
+    async def delete_list_item(self, frame: str, list_id: str, item_id: str) -> None:
+        await self._request("DELETE", f"/frames/{frame}/lists/{list_id}/list_items/{item_id}")
+
+
+def _rel_id(item: dict[str, Any], key: str) -> str | None:
+    value = ((item.get("relationships") or {}).get(key) or {}).get("data")
+    if isinstance(value, list):
+        value = value[0] if value else None
+    return str(value["id"]) if isinstance(value, dict) and value.get("id") else None

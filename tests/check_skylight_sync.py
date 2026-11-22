@@ -40,17 +40,22 @@ class FakeSkylight:
         self.calls.append(("list", after, before))
         return [dict(v) for v in self.items.values()]
 
-    async def create_chore(self, frame, summary, category_id, start, description=None):
+    async def create_chore(self, frame, summary, start, category_id=None, reward_points=None,
+                           up_for_grabs=False):
         self.n += 1
         sid = str(self.n)
         self.items[sid] = {"id": sid, "summary": summary, "status": "pending", "start": start,
-                           "category_id": category_id, "completed_category_id": None}
+                           "category_id": category_id, "completed_category_id": None,
+                           "up_for_grabs": up_for_grabs, "reward_points": reward_points}
         self.calls.append(("create", sid))
         return sid
 
-    async def set_chore_status(self, frame, chore_id, status="complete"):
+    async def set_chore_status(self, frame, chore_id, status="complete", category_id=None):
         self.items[chore_id]["status"] = status
-        self.calls.append(("status", chore_id, status))
+        self.items[chore_id]["completed_category_id"] = (
+            (category_id or self.items[chore_id]["category_id"]) if status == "complete" else None
+        )
+        self.calls.append(("status", chore_id, status, category_id))
 
     async def delete_chore(self, frame, chore_id):
         self.calls.append(("delete", chore_id))
@@ -62,18 +67,21 @@ class FakeSkylight:
 class FakeManager:
     def __init__(self):
         self.options = {"skylight_enabled": True, "skylight_frame": "1", "skylight_default_profile": "9",
-                        "skylight_profile_map": {"person.alex": "7"}}
+                        "skylight_profile_map": {"person.alex": "7", "person.sam": "8"},
+                        "skylight_up_for_grabs": True, "skylight_stars": 2}
         self.data = {"chores": {}, "history": [], "skylight": {"chores": {}, "auth": {"access_token": "x"}}}
         self.vacation = False
         self._h = 0
 
-    def add(self, cid, due=True):
-        self.data["chores"][cid] = {"id": cid, "name": cid.title(), "due": due, "snooze_until": None}
+    def add(self, cid, due=True, effort=1, responsible=()):
+        self.data["chores"][cid] = {"id": cid, "name": cid.title(), "due": due, "snooze_until": None,
+                                    "effort": effort, "responsible": list(responsible)}
 
     def due_chores(self, person=None):
         if self.vacation:
             return []
-        return [{"id": c["id"], "zone": "Zone", "name": c["name"], "responsible": []}
+        return [{"id": c["id"], "zone": "Zone", "name": c["name"], "responsible": c["responsible"],
+                 "effort": c["effort"]}
                 for c in self.data["chores"].values() if c["due"] and not c["snooze_until"]]
 
     def complete_chore(self, chore_id, by=None, when=None, source="manual"):
@@ -224,6 +232,49 @@ async def main():
     check("first miss does nothing", "oven" in mapped() and not mgr.data["chores"]["oven"]["snooze_until"])
     await sync.async_sync()
     check("second miss snoozes", "oven" not in mapped() and mgr.data["chores"]["oven"]["snooze_until"])
+
+    print("13. unassigned chores go up for grabs with stars; assigned ones go to the profile")
+    mgr.add("mop", effort=3)
+    mgr.add("bins", effort=1, responsible=["person.sam"])
+    await sync.async_sync()
+    mop = sky.items[mapped()["mop"]["sid"]]
+    bins = sky.items[mapped()["bins"]["sid"]]
+    check("unassigned is up for grabs", mop["up_for_grabs"] and mop["category_id"] is None, mop)
+    check("stars are effort times the setting", mop["reward_points"] == 6 and bins["reward_points"] == 2, (mop, bins))
+    check("assigned goes to that profile", bins["category_id"] == "8" and not bins["up_for_grabs"], bins)
+
+    print("14. up for grabs ticked on Skylight -> whoever ticked gets the credit")
+    mop["status"] = "complete"
+    mop["completed_category_id"] = "8"
+    await sync.async_sync()
+    check("credited to the person who ticked it", mgr.data["history"][-1]["by"] == "person.sam", mgr.data["history"][-1])
+
+    print("15. up for grabs completed here -> Skylight is told who did it")
+    mgr.add("dust", effort=2)
+    await sync.async_sync()
+    dust_sid = mapped()["dust"]["sid"]
+    mgr.complete_chore("dust", by="person.alex")
+    await sync.async_sync()
+    check("credited to that profile on Skylight", sky.items[dust_sid]["status"] == "complete"
+          and sky.items[dust_sid]["completed_category_id"] == "7", sky.items[dust_sid])
+    mgr.add("wipe")
+    await sync.async_sync()
+    wipe_sid = mapped()["wipe"]["sid"]
+    mgr.complete_chore("wipe", by=None)
+    await sync.async_sync()
+    check("unknown person falls back to the default profile", sky.items[wipe_sid]["completed_category_id"] == "9", sky.items[wipe_sid])
+    mgr.complete_chore("bins", by="person.alex")
+    await sync.async_sync()
+    last = [c for c in sky.calls if c[0] == "status"][-1]
+    check("assigned chore is ticked without naming anyone", last[3] is None, last)
+
+    print("16. up for grabs switched off -> default profile")
+    mgr.options["skylight_up_for_grabs"] = False
+    mgr.options["skylight_stars"] = 0
+    mgr.add("fan")
+    await sync.async_sync()
+    fan = sky.items[mapped()["fan"]["sid"]]
+    check("goes to the default profile with no stars", fan["category_id"] == "9" and not fan["up_for_grabs"] and fan["reward_points"] is None, fan)
 
     print(f"\n{'FAILED: ' + ', '.join(FAILED) if FAILED else 'all scenarios passed'}")
     sys.exit(1 if FAILED else 0)
