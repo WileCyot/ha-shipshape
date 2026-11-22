@@ -1,8 +1,9 @@
 """Best-effort two-way sync of due chores with Skylight's Chores.
 
-Home Assistant -> Skylight: every due chore becomes a one-off Skylight chore.
-Skylight -> Home Assistant: ticking it off on the display completes it here;
-deleting it on the display snoozes it here for a day.
+Home Assistant -> Skylight: every due chore becomes a one-off Skylight chore,
+and completing it here ticks it there.
+Skylight -> Home Assistant: ticking it on the display completes it here,
+un-ticking it again reopens it here, and deleting it snoozes it for a day.
 
 Built on Skylight's private API (see skylight.py), so every failure is logged
 and swallowed. Nothing else in Shipshape depends on this.
@@ -37,10 +38,13 @@ INTERVAL = timedelta(minutes=5)
 MAX_CREATES_PER_RUN = 10
 MAX_OPEN_ON_SKYLIGHT = 30
 WRITE_PAUSE = 2.0
+# How long a finished chore stays watched so that un-ticking it on the display
+# can still reopen it here.
+DONE_KEEP_DAYS = 1
 
 
 class SkylightSync:
-    """Mirrors due chores to a Skylight frame and reads completions back."""
+    """Mirrors due chores to a Skylight frame and reads changes back."""
 
     def __init__(self, hass: HomeAssistant, manager: ShipshapeManager) -> None:
         self.hass = hass
@@ -160,22 +164,73 @@ class SkylightSync:
                 return person
         return None
 
+    def _last_history_id(self, chore_id: str) -> str | None:
+        for entry in reversed(self.manager.data["history"]):
+            if entry.get("chore_id") == chore_id:
+                return entry.get("id")
+        return None
+
+    def _due_view(self, chore_id: str) -> dict[str, Any] | None:
+        return next((v for v in self.manager.due_chores() if v["id"] == chore_id), None)
+
     async def _sync(self) -> None:
+        if self.manager.vacation:
+            # Everything is frozen; leave the display exactly as it is.
+            return
         client = self.client()
         frame = self.frame
         mapped: dict[str, dict[str, Any]] = self._state["chores"]
+        done: dict[str, dict[str, Any]] = self._state.setdefault("done", {})
         today = dt_util.now().date()
         due = {view["id"]: view for view in self.manager.due_chores()}
 
+        # --- stop watching finished chores that are old news ---------------
+        for chore_id, rec in list(done.items()):
+            day = parse_date(rec.get("day")) or today
+            if (today - day).days > DONE_KEEP_DAYS or chore_id not in self.manager.data["chores"]:
+                done.pop(chore_id)
+
         # --- read Skylight ------------------------------------------------
         remote: dict[str, dict[str, Any]] = {}
-        if mapped:
-            days = [parse_date(rec.get("start")) or today for rec in mapped.values()]
+        if mapped or done:
+            days = [
+                parse_date(rec.get("start")) or today for rec in (*mapped.values(), *done.values())
+            ]
             after = min([today, *days]).isoformat()
             for item in await client.chores(frame, after, today.isoformat()):
                 remote[item["id"]] = item
 
-        writes = 0
+        # --- finished chores that were un-ticked on the display ------------
+        for chore_id, rec in list(done.items()):
+            item = remote.get(rec["sid"])
+            if item is None or item.get("status") != "pending":
+                continue
+            done.pop(chore_id)
+            current = mapped.get(chore_id)
+            if current is not None and current["sid"] != rec["sid"]:
+                # The chore is already open again under a newer Skylight chore,
+                # so this one is a duplicate on the display.
+                try:
+                    await client.delete_chore(frame, rec["sid"])
+                except SkylightError as err:
+                    _LOGGER.warning("Could not remove a duplicate Skylight chore: %s", err)
+                await asyncio.sleep(WRITE_PAUSE)
+                continue
+            if chore_id not in due:
+                _LOGGER.info("Chore %s was un-ticked on Skylight; reopening it", chore_id)
+                try:
+                    if not rec.get("history_id"):
+                        raise ShipshapeError("no completion on record")
+                    self.manager.undo(rec["history_id"])
+                except ShipshapeError:
+                    self.manager.make_due(chore_id)
+                view = self._due_view(chore_id)
+                if view is None:
+                    continue
+                due[chore_id] = view
+            mapped[chore_id] = {"sid": rec["sid"], "start": rec.get("start") or today.isoformat()}
+
+        # --- chores we are tracking as open on the display ----------------
         for chore_id, rec in list(mapped.items()):
             item = remote.get(rec["sid"])
             view = due.get(chore_id)
@@ -197,10 +252,19 @@ class SkylightSync:
             rec["misses"] = 0
             if item.get("status") == "complete":
                 mapped.pop(chore_id)
+                history_id = self._last_history_id(chore_id)
                 if view is not None:
                     by = self._person_for(item.get("completed_category_id") or item.get("category_id"))
-                    self.manager.complete_chore(chore_id, by=by, source="skylight")
+                    entry = self.manager.complete_chore(chore_id, by=by, source="skylight")
+                    history_id = entry["id"]
                     due.pop(chore_id, None)
+                if chore_id in self.manager.data["chores"]:
+                    done[chore_id] = {
+                        "sid": rec["sid"],
+                        "start": rec.get("start"),
+                        "history_id": history_id,
+                        "day": today.isoformat(),
+                    }
                 continue
             if view is None:
                 # Handled in Home Assistant: tick it off on the display too,
@@ -209,10 +273,15 @@ class SkylightSync:
                 snoozed = exists and self.manager.data["chores"][chore_id].get("snooze_until")
                 if exists and not snoozed:
                     await client.set_chore_status(frame, rec["sid"], "complete")
+                    done[chore_id] = {
+                        "sid": rec["sid"],
+                        "start": rec.get("start"),
+                        "history_id": self._last_history_id(chore_id),
+                        "day": today.isoformat(),
+                    }
                 else:
                     await client.delete_chore(frame, rec["sid"])
                 mapped.pop(chore_id)
-                writes += 1
                 await asyncio.sleep(WRITE_PAUSE)
 
         # --- push what is newly due ---------------------------------------

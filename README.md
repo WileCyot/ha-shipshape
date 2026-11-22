@@ -54,7 +54,7 @@ There are two ways to get chores onto a Skylight display. They can be used toget
 
 **Calendar bridge (dependable).** Add Home Assistant's Google Calendar integration with read/write access, create a calendar for chores in the Google account your Skylight syncs, and select it under *Calendar bridge*. Each due chore appears as an all-day event and overdue ones roll forward to today. Skylight supports two-way sync for Google calendars the account owns.
 
-**Skylight Chores (unofficial).** Skylight has no public API. This talks to the private API the Skylight app uses, as worked out by community projects. It can break whenever Skylight changes their app, and Skylight does not support it. When it works: due chores show up as real Skylight chores, ticking one off on the display completes it in Home Assistant, and deleting one snoozes it for a day. Sign-in may ask for a code that Skylight emails to the account owner. Your password is used once and is not stored; only the session tokens are kept.
+**Skylight Chores (unofficial).** Skylight has no public API. This talks to the private API the Skylight app uses, as worked out by community projects. It can break whenever Skylight changes their app, and Skylight does not support it. When it works: due chores show up as real Skylight chores, ticking one off on the display completes it in Home Assistant, un-ticking it reopens it, and deleting one snoozes it for a day. Sign-in may ask for a code that Skylight emails to the account owner. Your password is used once and is not stored; only the session tokens are kept.
 
 ## Actions
 
